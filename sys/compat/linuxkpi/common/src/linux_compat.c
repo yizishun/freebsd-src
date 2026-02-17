@@ -38,6 +38,7 @@
 #include <sys/sysctl.h>
 #include <sys/proc.h>
 #include <sys/sglist.h>
+#include <sys/sysproto.h>
 #include <sys/sleepqueue.h>
 #include <sys/refcount.h>
 #include <sys/lock.h>
@@ -786,43 +787,55 @@ linux_dev_fdopen(struct cdev *dev, int fflags, struct thread *td,
 #define	LINUX_IOCTL_MIN_PTR 0x10000UL
 #define	LINUX_IOCTL_MAX_PTR (LINUX_IOCTL_MIN_PTR + IOCPARM_MAX)
 
+#define REMAP_TO_KERNEL 1
+#define REMAP_TO_USER   0
+
 static inline int
 linux_remap_address(void **uaddr, size_t len)
 {
 	uintptr_t uaddr_val = (uintptr_t)(*uaddr);
+	struct task_struct *pts;
 
-	if (unlikely(uaddr_val >= LINUX_IOCTL_MIN_PTR &&
-	    uaddr_val < LINUX_IOCTL_MAX_PTR)) {
-		struct task_struct *pts = current;
-		if (pts == NULL) {
-			*uaddr = NULL;
-			return (1);
-		}
+	if (likely(uaddr_val < LINUX_IOCTL_MIN_PTR ||
+	    uaddr_val >= LINUX_IOCTL_MAX_PTR))
+		return (REMAP_TO_USER);
 
-		/* compute data offset */
-		uaddr_val -= LINUX_IOCTL_MIN_PTR;
+	pts = current;
+	if (pts == NULL)
+		goto err;
 
-		/* check that length is within bounds */
-		if ((len > IOCPARM_MAX) ||
-		    (uaddr_val + len) > pts->bsd_ioctl_len) {
-			*uaddr = NULL;
-			return (1);
-		}
+	if (uaddr_val + len > LINUX_IOCTL_MAX_PTR ||
+	    len > IOCPARM_MAX)
+		goto err;
 
-		/* re-add kernel buffer address */
-		uaddr_val += (uintptr_t)pts->bsd_ioctl_data;
+	/* compute data offset */
+	uaddr_val -= LINUX_IOCTL_MIN_PTR;
 
-		/* update address location */
+	/* hit the kernel buffer(fast path) */
+	if (uaddr_val + len <= pts->bsd_ioctl_len) {
+		uaddr_val += (uintptr_t)pts->bsd_ioctl_data_kern;
 		*uaddr = (void *)uaddr_val;
-		return (1);
+		return (REMAP_TO_KERNEL);
 	}
-	return (0);
+
+	/*
+	 * Fallback to user-space pointer. (slow path)
+	 * This occurs when accessing flexible array members.
+	 */
+	uaddr_val += (uintptr_t)pts->bsd_ioctl_data_user;
+	*uaddr = (void *)uaddr_val;
+
+	return (REMAP_TO_USER);
+
+err:
+	*uaddr = NULL;
+	return (REMAP_TO_KERNEL);
 }
 
 int
 linux_copyin(const void *uaddr, void *kaddr, size_t len)
 {
-	if (linux_remap_address(__DECONST(void **, &uaddr), len)) {
+	if (linux_remap_address(__DECONST(void **, &uaddr), len) == REMAP_TO_KERNEL) {
 		if (uaddr == NULL)
 			return (-EFAULT);
 		memcpy(kaddr, uaddr, len);
@@ -834,7 +847,7 @@ linux_copyin(const void *uaddr, void *kaddr, size_t len)
 int
 linux_copyout(const void *kaddr, void *uaddr, size_t len)
 {
-	if (linux_remap_address(&uaddr, len)) {
+	if (linux_remap_address(&uaddr, len) == REMAP_TO_KERNEL) {
 		if (uaddr == NULL)
 			return (-EFAULT);
 		memcpy(uaddr, kaddr, len);
@@ -913,6 +926,13 @@ linux_get_error(struct task_struct *task, int error)
 	return (error);
 }
 
+static inline char *
+linux_get_ioctl_user_ptr(struct thread *td)
+{
+	struct ioctl_args *args = (struct ioctl_args *)td->td_sa.args;
+	return (args->data);
+}
+
 static int
 linux_file_ioctl_sub(struct file *fp, struct linux_file *filp,
     const struct file_operations *fop, u_long cmd, caddr_t data,
@@ -927,11 +947,13 @@ linux_file_ioctl_sub(struct file *fp, struct linux_file *filp,
 	if (size > 0) {
 		/*
 		 * Setup hint for linux_copyin() and linux_copyout().
+		 * But save a copy of user-space pointer.
 		 *
 		 * Background: Linux code expects a user-space address
 		 * while FreeBSD supplies a kernel-space address.
 		 */
-		task->bsd_ioctl_data = data;
+		task->bsd_ioctl_data_kern = data;
+		task->bsd_ioctl_data_user = linux_get_ioctl_user_ptr(td);
 		task->bsd_ioctl_len = size;
 		data = (void *)LINUX_IOCTL_MIN_PTR;
 	} else {
@@ -964,7 +986,8 @@ linux_file_ioctl_sub(struct file *fp, struct linux_file *filp,
 		}
 	}
 	if (size > 0) {
-		task->bsd_ioctl_data = NULL;
+		task->bsd_ioctl_data_user = NULL;
+		task->bsd_ioctl_data_kern = NULL;
 		task->bsd_ioctl_len = 0;
 	}
 
