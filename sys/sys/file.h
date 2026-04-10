@@ -223,6 +223,8 @@ struct file {
 	 *  DFLAG_SEEKABLE specific fields
 	 */
 	off_t		f_offset;
+
+	caddr_t		f_ioctl_uptr;
 };
 
 #define	f_cdevpriv	f_vnun.fvn_cdevpriv

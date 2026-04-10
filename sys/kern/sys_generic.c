@@ -661,7 +661,7 @@ sys_ioctl(struct thread *td, struct ioctl_args *uap)
 	uint32_t com;
 	int arg, error;
 	u_int size;
-	caddr_t data;
+	caddr_t data, uptr = NULL;
 
 #ifdef INVARIANTS
 	if (uap->com > 0xffffffff) {
@@ -694,6 +694,7 @@ sys_ioctl(struct thread *td, struct ioctl_args *uap)
 			data = (void *)&arg;
 			size = 0;
 		} else {
+			uptr = uap->data;
 			if (size > SYS_IOCTL_SMALL_SIZE)
 				data = malloc((u_long)size, M_IOCTLOPS, M_WAITOK);
 			else
@@ -713,7 +714,7 @@ sys_ioctl(struct thread *td, struct ioctl_args *uap)
 		bzero(data, size);
 	}
 
-	error = kern_ioctl(td, uap->fd, com, data);
+	error = kern_ioctl(td, uap->fd, com, data, uptr);
 
 	if (error == 0 && (com & IOC_OUT))
 		error = copyout(data, uap->data, (u_int)size);
@@ -725,7 +726,7 @@ out:
 }
 
 int
-kern_ioctl(struct thread *td, int fd, u_long com, caddr_t data)
+kern_ioctl(struct thread *td, int fd, u_long com, caddr_t data, caddr_t uptr)
 {
 	struct file *fp;
 	struct filedesc *fdp;
@@ -808,6 +809,7 @@ kern_ioctl(struct thread *td, int fd, u_long com, caddr_t data)
 		fsetfl_unlock(fp);
 		break;
 	default:
+		fp->f_ioctl_uptr = uptr;
 		error = fo_ioctl(fp, com, data, td->td_ucred, td);
 		break;
 	}
