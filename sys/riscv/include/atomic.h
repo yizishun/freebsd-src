@@ -35,18 +35,24 @@
 #ifndef	_MACHINE_ATOMIC_H_
 #define	_MACHINE_ATOMIC_H_
 
-#include <sys/atomic_common.h>
-
 #define	fence()	__asm __volatile("fence" ::: "memory");
 #define	mb()	fence()
 #define	rmb()	fence()
 #define	wmb()	fence()
+
+#if defined(SAN_NEEDS_INTERCEPTORS) && !defined(SAN_RUNTIME)
+#include <sys/atomic_san.h>
+#else
+
+#include <sys/atomic_common.h>
 
 static __inline int atomic_cmpset_8(__volatile uint8_t *, uint8_t, uint8_t);
 static __inline int atomic_fcmpset_8(__volatile uint8_t *, uint8_t *, uint8_t);
 static __inline int atomic_cmpset_16(__volatile uint16_t *, uint16_t, uint16_t);
 static __inline int atomic_fcmpset_16(__volatile uint16_t *, uint16_t *,
     uint16_t);
+static __inline void atomic_set_16(volatile uint16_t *p, uint16_t bit);
+static __inline void atomic_clear_16(volatile uint16_t *p, uint16_t bit);
 
 #define	ATOMIC_ACQ_REL(NAME, WIDTH)					\
 static __inline  void							\
@@ -103,8 +109,84 @@ atomic_fcmpset_rel_##WIDTH(__volatile uint##WIDTH##_t *p,		\
 	return (atomic_fcmpset_##WIDTH(p, cmpval, newval));		\
 }
 
+// TODO: Zabha support
+static __inline void
+atomic_add_8(volatile uint8_t *p, uint8_t val)
+{
+	uint8_t v;
+
+	v = atomic_load_8(p);
+	for (;;) {
+		if (atomic_fcmpset_8(p, &v, v + val))
+			break;
+	}
+}
+
+static __inline void
+atomic_subtract_8(volatile uint8_t *p, uint8_t val)
+{
+	uint8_t v;
+
+	v = atomic_load_8(p);
+	for (;;) {
+		if (atomic_fcmpset_8(p, &v, v - val))
+			break;
+	}
+}
+
+static __inline void
+atomic_set_8(volatile uint8_t *p, uint8_t val)
+{
+	uint8_t v;
+
+	v = atomic_load_8(p);
+	for (;;) {
+		if (atomic_fcmpset_8(p, &v, v | val))
+			break;
+	}
+}
+
+static __inline void
+atomic_clear_8(volatile uint8_t *p, uint8_t val)
+{
+	uint8_t v;
+
+	v = atomic_load_8(p);
+	for (;;) {
+		if (atomic_fcmpset_8(p, &v, v & ~val))
+			break;
+	}
+}
+
+ATOMIC_ACQ_REL(set, 8)
+ATOMIC_ACQ_REL(clear, 8)
+ATOMIC_ACQ_REL(add, 8)
+ATOMIC_ACQ_REL(subtract, 8)
+
 ATOMIC_CMPSET_ACQ_REL(8);
 ATOMIC_FCMPSET_ACQ_REL(8);
+
+#define	atomic_load_acq_8	atomic_load_acq_8
+static __inline uint8_t
+atomic_load_acq_8(const volatile uint8_t *p)
+{
+	uint8_t ret;
+
+	ret = *p;
+
+	fence();
+
+	return (ret);
+}
+
+static __inline void
+atomic_store_rel_8(volatile uint8_t *p, uint8_t val)
+{
+
+	fence();
+
+	*p = val;
+}
 
 #define	atomic_cmpset_char		atomic_cmpset_8
 #define	atomic_cmpset_acq_char		atomic_cmpset_acq_8
@@ -112,9 +194,41 @@ ATOMIC_FCMPSET_ACQ_REL(8);
 #define	atomic_fcmpset_char		atomic_fcmpset_8
 #define	atomic_fcmpset_acq_char		atomic_fcmpset_acq_8
 #define	atomic_fcmpset_rel_char		atomic_fcmpset_rel_8
+#define	atomic_load_acq_char		atomic_load_acq_8
+#define	atomic_store_rel_char		atomic_store_rel_8
 
 #define	atomic_cmpset_short		atomic_cmpset_16
 #define	atomic_fcmpset_short		atomic_fcmpset_16
+
+// TODO: Zabha support
+static __inline void
+atomic_add_16(volatile uint16_t *p, uint16_t val)
+{
+	uint16_t v;
+
+	v = atomic_load_16(p);
+	for (;;) {
+		if (atomic_fcmpset_16(p, &v, v + val))
+			break;
+	}
+}
+
+static __inline void
+atomic_subtract_16(volatile uint16_t *p, uint16_t val)
+{
+	uint16_t v;
+
+	v = atomic_load_16(p);
+	for (;;) {
+		if (atomic_fcmpset_16(p, &v, v - val))
+			break;
+	}
+}
+
+ATOMIC_ACQ_REL(set, 16)
+ATOMIC_ACQ_REL(clear, 16)
+ATOMIC_ACQ_REL(add, 16)
+ATOMIC_ACQ_REL(subtract, 16)
 
 ATOMIC_CMPSET_ACQ_REL(16);
 ATOMIC_FCMPSET_ACQ_REL(16);
@@ -302,6 +416,8 @@ atomic_testandset_32(volatile uint32_t *p, u_int val)
 #define	atomic_readandclear_int	atomic_readandclear_32
 #define	atomic_set_int		atomic_set_32
 #define	atomic_subtract_int	atomic_subtract_32
+#define atomic_testandset_int	atomic_testandset_32
+#define atomic_testandclear_int	atomic_testandclear_32
 
 ATOMIC_ACQ_REL(set, 32)
 ATOMIC_ACQ_REL(clear, 32)
@@ -659,4 +775,5 @@ atomic_thread_fence_seq_cst(void)
 #define	atomic_set_short		atomic_set_16
 #define	atomic_clear_short		atomic_clear_16
 
+#endif /* KCSAN && !KCSAN_RUNTIME */
 #endif /* _MACHINE_ATOMIC_H_ */

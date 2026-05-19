@@ -116,6 +116,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/asan.h>
 #include <sys/bitstring.h>
 #include <sys/bus.h>
 #include <sys/cpuset.h>
@@ -157,6 +158,7 @@
 #include <machine/pcb.h>
 #include <machine/sbi.h>
 #include <machine/thead.h>
+#include "riscv/include/asan.h"
 
 /*
  * Boundary values for the page table page index space:
@@ -303,6 +305,10 @@ static struct md_page *pv_table;
 static struct md_page pv_dummy;
 
 extern cpuset_t all_harts;
+
+#if defined(KASAN)
+extern pt_entry_t bootstrap_pt_l1[];
+#endif
 
 /*
  * Internal flags for pmap_enter()'s helper functions.
@@ -881,6 +887,20 @@ pmap_create_pagetables(vm_paddr_t kernstart, vm_size_t kernlen,
 		pmap_store(&l1[slot], L1_PDE(pa, PTE_V));
 	}
 
+#ifdef KASAN
+	pd_entry_t kasanl2pt;
+	/* Connect the early KASAN shadow to L1 */
+	slot = pmap_l1_index(KASAN_MIN_ADDRESS);
+	int nkasanl2 = howmany(
+		howmany(KASAN_MAX_ADDRESS - KASAN_MIN_ADDRESS, L2_SIZE),Ln_ENTRIES);
+	for (i = 0; i < nkasanl2; i++, slot++) {
+		if (((kasanl2pt = pmap_load(&bootstrap_pt_l1[slot])) & PTE_V) != 0) {
+			pa = PTE_TO_PHYS(kasanl2pt);
+			pmap_store(&l1[slot], L1_PDE(pa, PTE_V));
+		}
+	}
+#endif
+
 	/* Connect the L1 table to L0, if in use. */
 	if (pmap_mode == PMAP_MODE_SV48) {
 		slot = pmap_l0_index(KERNBASE);
@@ -1008,6 +1028,64 @@ pmap_bootstrap(vm_paddr_t kernstart, vm_size_t kernlen)
 	physmem_exclude_region(kernstart, freemempos - kernstart,
 	    EXFLAG_NOALLOC);
 }
+
+#if defined(KASAN)
+static void
+pmap_bootstrap_allocate_san_l2(vm_paddr_t start_pa, vm_paddr_t end_pa,
+    vm_offset_t *vap, vm_offset_t eva)
+{
+	vm_paddr_t pa;
+	vm_offset_t va;
+	pd_entry_t *l2;
+
+	va = *vap;
+	pa = rounddown2(end_pa - L2_SIZE, L2_SIZE);
+	for (; pa >= start_pa && va < eva; va += L2_SIZE, pa -= L2_SIZE) {
+		l2 = pmap_l2(kernel_pmap, va);
+		MPASS(l2 != NULL);
+
+		if ((pmap_load(l2) & PTE_V) != 0) {
+			pa += L2_SIZE;
+			continue;
+		}
+
+		bzero_early(PHYS_TO_DMAP(pa), L2_SIZE);
+		physmem_exclude_region(pa, L2_SIZE, EXFLAG_NOALLOC);
+		pmap_store(l2, L2_PTE(pa, PTE_KERN | PTE_V));
+	}
+	*vap = va;
+}
+
+void
+pmap_bootstrap_san(void)
+{
+	vm_offset_t eva;
+	vm_offset_t va = KASAN_MIN_ADDRESS;
+	vm_paddr_t physmap[PHYS_AVAIL_ENTRIES];
+	int physmap_idx, i;
+
+	physmap_idx = physmem_avail(physmap, nitems(physmap));
+
+	eva = kasan_md_addr_to_shad(virtual_avail);
+
+	for (i = physmap_idx - 2; i >= 0; i -= 2) {
+		vm_paddr_t plow, phigh;
+
+		/* L2 mappings must be backed by memory that is L2-aligned */
+		plow = roundup2(physmap[i], L2_SIZE);
+		phigh = physmap[i + 1];
+		if (plow >= phigh)
+			continue;
+		if (phigh - plow >= L2_SIZE) {
+			pmap_bootstrap_allocate_san_l2(plow, phigh, &va, eva);
+			if (va >= eva)
+				break;
+		}
+	}
+	if (i < 0)
+		panic("Could not find phys region for shadow map");
+}
+#endif
 
 /*
  *	Initialize a vm_page's machine-dependent fields.
@@ -1649,6 +1727,9 @@ pmap_pinit_stage(pmap_t pmap, enum pmap_stage stage)
 		for (i = pmap_l1_index(VM_MIN_KERNEL_ADDRESS);
 		    i < pmap_l1_index(VM_MAX_KERNEL_ADDRESS); i++)
 			pmap->pm_top[i] = kernel_pmap->pm_top[i];
+		for (i = pmap_l1_index(KASAN_MIN_ADDRESS);
+		    i < pmap_l1_index(KASAN_MAX_ADDRESS); i++)
+			pmap->pm_top[i] = kernel_pmap->pm_top[i];
 		for (i = pmap_l1_index(DMAP_MIN_ADDRESS);
 		    i < pmap_l1_index(DMAP_MAX_ADDRESS); i++)
 			pmap->pm_top[i] = kernel_pmap->pm_top[i];
@@ -1971,6 +2052,8 @@ pmap_growkernel_nopanic(vm_offset_t addr)
 	addr = roundup2(addr, L2_SIZE);
 	if (addr - 1 >= vm_map_max(kernel_map))
 		addr = vm_map_max(kernel_map);
+	if (kernel_vm_end < addr)
+		kasan_shadow_map(kernel_vm_end, addr - kernel_vm_end);
 	while (kernel_vm_end < addr) {
 		l1 = pmap_l1(kernel_pmap, kernel_vm_end);
 		if (pmap_load(l1) == 0) {
@@ -5402,6 +5485,155 @@ pmap_get_tables(pmap_t pmap, vm_offset_t va, pd_entry_t **l1, pd_entry_t **l2,
 
 	return (true);
 }
+#if defined(KASAN)
+
+vm_paddr_t kernstart_pa;
+
+#define	SAN_EARLY_SHADOW_SIZE	(1 * L2_SIZE)
+#define	SAN_EARLY_L2_PT_SIZE	(1 * PAGE_SIZE)
+#define SAN_EARLY_VTOPHYS(va) \
+	((vm_paddr_t)(va) - KERNBASE + kernstart_pa)
+#define SAN_EARLY_PHYSTOV(pa) \
+	((vm_offset_t)(pa) - kernstart_pa + KERNBASE)
+
+static pt_entry_t * __nosanitizeaddress __nosanitizememory
+pmap_san_alloc_table_early(void)
+{
+	static uint8_t bootstrap_data[SAN_EARLY_L2_PT_SIZE] __aligned(PAGE_SIZE);
+	static size_t offset = 0;
+	vm_offset_t addr;
+
+	if (offset + PAGE_SIZE > sizeof(bootstrap_data)) {
+		panic("%s: out of memory for the bootstrap shadow map",
+		    __func__);
+	}
+
+	addr = SAN_EARLY_VTOPHYS(&bootstrap_data[offset]);
+	offset += PAGE_SIZE;
+	return ((pt_entry_t *)addr);
+}
+
+static vm_paddr_t __nosanitizeaddress __nosanitizememory
+pmap_san_alloc_l2_shadow_early(void)
+{
+	static uint8_t bootstrap_data[SAN_EARLY_SHADOW_SIZE] __aligned(L2_SIZE);
+	static size_t offset = 0;
+	vm_offset_t addr;
+
+	if (offset + L2_SIZE > sizeof(bootstrap_data)) {
+		panic("%s: out of memory for the bootstrap shadow map L2 entries",
+		    __func__);
+	}
+
+	addr = SAN_EARLY_VTOPHYS(&bootstrap_data[offset]);
+	offset += L2_SIZE;
+	return (addr);
+}
+
+/*
+ * Map a shadow page, before the kernel has bootstrapped its page tables.  This
+ * is currently only used to shadow the temporary boot stack set up by locore.
+ */
+static void __nosanitizeaddress __nosanitizememory
+pmap_san_enter_early(vm_offset_t va)
+{
+	pt_entry_t *l2_pt;
+	vm_paddr_t shadow;
+	int l1_slot, l2_slot;
+
+	l1_slot = pmap_l1_index(va);
+	l2_slot = pmap_l2_index(va);
+	
+	/* alloc and link this L2 pt to bootstrap_pt_l1 */
+	if ((pmap_load(&bootstrap_pt_l1[l1_slot]) & PTE_V) == 0) {
+		l2_pt = pmap_san_alloc_table_early();
+
+		pmap_store(&bootstrap_pt_l1[l1_slot],
+			L1_PDE((vm_paddr_t)l2_pt, PTE_V));
+	} else {
+		l2_pt = (pt_entry_t *)PTE_TO_PHYS(pmap_load(&bootstrap_pt_l1[l1_slot]));
+	}
+
+	/* alloc and link a L2 supperpage for the early shadow map */
+	if ((pmap_load(&l2_pt[l2_slot]) & PTE_V) == 0) {
+		/*
+		 * If the second va enter in it, now it will panic in
+		 * pmap_san_alloc_l2_shadow_early, cause we only have 1 *
+		 * L2_SIZE.  But this design will allow we can expand its size in
+		 * the future.
+		 */
+		shadow = pmap_san_alloc_l2_shadow_early();
+
+		pmap_store(&l2_pt[l2_slot],
+			L2_PTE(shadow, PTE_KERN | PTE_V));
+	}
+
+}
+
+static vm_page_t
+pmap_san_enter_alloc_4k(void)
+{
+	vm_page_t m;
+
+	m = vm_page_alloc_noobj(VM_ALLOC_INTERRUPT | VM_ALLOC_WIRED |
+	    VM_ALLOC_ZERO);
+	if (m == NULL)
+		panic("%s: no memory to grow shadow map", __func__);
+	return (m);
+}
+
+static vm_page_t
+pmap_san_enter_alloc_2m(void)
+{
+	return (vm_page_alloc_noobj_contig(VM_ALLOC_WIRED | VM_ALLOC_ZERO,
+	    Ln_ENTRIES, 0, ~0ul, L2_SIZE, 0, VM_MEMATTR_DEFAULT));
+}
+
+void __nosanitizeaddress __nosanitizememory
+pmap_san_enter(vm_offset_t va)
+{
+	pd_entry_t *l1, *l2;
+	pt_entry_t *l3;
+	vm_page_t m;
+	if (virtual_avail == 0) {
+		/*
+		 * Before we enter the first C function - initriscv, we should
+		 * build a shadow map for its bootstack 
+		 */
+		pmap_san_enter_early(va);
+		return;
+	}
+	mtx_assert(&kernel_map->system_mtx, MA_OWNED);
+	l1 = pmap_l1(kernel_pmap, va);
+	MPASS(l1 != NULL);
+	if ((pmap_load(l1) & PTE_V) == 0) {
+		m = pmap_san_enter_alloc_4k();
+		pmap_store(l1, L1_PDE(VM_PAGE_TO_PHYS(m), PTE_V));
+	}
+	
+	l2 = pmap_l1_to_l2(l1, va);
+	if ((pmap_load(l2) & PTE_V) == 0) {
+		m = pmap_san_enter_alloc_2m();
+		if (m != NULL) {
+			pmap_store(l2, L2_PTE(VM_PAGE_TO_PHYS(m), PTE_KERN | PTE_V));
+		} else {
+			m = pmap_san_enter_alloc_4k();
+			pmap_store(l2, L2_PDE(VM_PAGE_TO_PHYS(m), PTE_V));
+		}
+		wmb();
+	}
+	if ((pmap_load(l2) & PTE_V) != 0 &&
+ 	    (pmap_load(l2) & PTE_RWX) != 0)
+		return;
+	
+	l3 = pmap_l2_to_l3(l2, va);
+	if ((pmap_load(l3) & PTE_V) != 0)
+		return;
+	m = pmap_san_enter_alloc_4k();
+	pmap_store(l3, L3_PTE(VM_PAGE_TO_PHYS(m), PTE_KERN | PTE_V));
+	wmb();
+}
+#endif
 
 /*
  * Track a range of the kernel's virtual address space that is contiguous
@@ -5541,6 +5773,10 @@ sysctl_kmaps(SYSCTL_HANDLER_ARGS)
 			sbuf_printf(sb, "\nDirect map:\n");
 		else if (i == pmap_l1_index(VM_MIN_KERNEL_ADDRESS))
 			sbuf_printf(sb, "\nKernel map:\n");
+#ifdef KASAN
+		else if (i == pmap_l1_index(KASAN_MIN_ADDRESS))
+			sbuf_printf(sb, "\nKASAN shadow map:\n");
+#endif
 
 		l1 = pmap_l1(kernel_pmap, sva);
 		l1e = pmap_load(l1);
