@@ -35,12 +35,16 @@
 #ifndef	_MACHINE_ATOMIC_H_
 #define	_MACHINE_ATOMIC_H_
 
-#include <sys/atomic_common.h>
-
 #define	fence()	__asm __volatile("fence" ::: "memory");
 #define	mb()	fence()
 #define	rmb()	fence()
 #define	wmb()	fence()
+
+#if defined(SAN_NEEDS_INTERCEPTORS) && !defined(SAN_RUNTIME)
+#include <sys/atomic_san.h>
+#else
+
+#include <sys/atomic_common.h>
 
 static __inline int atomic_cmpset_8(__volatile uint8_t *, uint8_t, uint8_t);
 static __inline int atomic_fcmpset_8(__volatile uint8_t *, uint8_t *, uint8_t);
@@ -771,4 +775,5 @@ atomic_thread_fence_seq_cst(void)
 #define	atomic_set_short		atomic_set_16
 #define	atomic_clear_short		atomic_clear_16
 
+#endif /* SAN_NEEDS_INTERCEPTORS && !SAN_RUNTIME */
 #endif /* _MACHINE_ATOMIC_H_ */
