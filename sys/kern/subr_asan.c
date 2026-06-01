@@ -632,255 +632,263 @@ kasan_casueword(volatile u_long *base, u_long oldval, u_long *oldvalp,
 #include <machine/atomic.h>
 #include <sys/atomic_san.h>
 
-#define _ASAN_ATOMIC_FUNC_ADD(name, type)				\
-	void kasan_atomic_add_##name(volatile type *ptr, type val)	\
+#define DEFINE_KASAN_ATOMIC_TYPES(name, type) \
+    typedef type KASAN_ATOMIC_TYPE_##name;        \
+    typedef type KASAN_ATOMIC_TYPE_acq_##name;    \
+    typedef type KASAN_ATOMIC_TYPE_rel_##name;
+
+DEFINE_KASAN_ATOMIC_TYPES(8,     uint8_t)
+DEFINE_KASAN_ATOMIC_TYPES(16,    uint16_t)
+DEFINE_KASAN_ATOMIC_TYPES(32,    uint32_t)
+DEFINE_KASAN_ATOMIC_TYPES(64,    uint64_t)
+DEFINE_KASAN_ATOMIC_TYPES(char,  u_char)
+DEFINE_KASAN_ATOMIC_TYPES(short, u_short)
+DEFINE_KASAN_ATOMIC_TYPES(int,   u_int)
+DEFINE_KASAN_ATOMIC_TYPES(long,  u_long)
+DEFINE_KASAN_ATOMIC_TYPES(ptr,   uintptr_t)
+
+typedef bool KASAN_ATOMIC_TYPE_bool;
+
+#undef DEFINE_KASAN_ATOMIC_TYPES
+
+#define ASAN_ATOMIC_FUNC_ADD(name)					\
+	void								\
+	kasan_atomic_add_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr,			\
+	    KASAN_ATOMIC_TYPE_##name val)				\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		atomic_add_##name(ptr, val);				\
 	}
 
-#define	ASAN_ATOMIC_FUNC_ADD(name, type)				\
-	_ASAN_ATOMIC_FUNC_ADD(name, type)				\
-	_ASAN_ATOMIC_FUNC_ADD(acq_##name, type)				\
-	_ASAN_ATOMIC_FUNC_ADD(rel_##name, type)
+#define ASAN_ATOMIC_FUNC_ADD_ACQ(name)	ASAN_ATOMIC_FUNC_ADD(acq_##name)
+#define ASAN_ATOMIC_FUNC_ADD_REL(name)	ASAN_ATOMIC_FUNC_ADD(rel_##name)
 
-#define _ASAN_ATOMIC_FUNC_SUBTRACT(name, type)				\
-	void kasan_atomic_subtract_##name(volatile type *ptr, type val)	\
+#define ASAN_ATOMIC_FUNC_SUBTRACT(name)					\
+	void								\
+	kasan_atomic_subtract_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr,			\
+	    KASAN_ATOMIC_TYPE_##name val)				\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		atomic_subtract_##name(ptr, val);			\
 	}
 
-#define	ASAN_ATOMIC_FUNC_SUBTRACT(name, type)				\
-	_ASAN_ATOMIC_FUNC_SUBTRACT(name, type)				\
-	_ASAN_ATOMIC_FUNC_SUBTRACT(acq_##name, type)			\
-	_ASAN_ATOMIC_FUNC_SUBTRACT(rel_##name, type)
+#define ASAN_ATOMIC_FUNC_SUBTRACT_ACQ(name)				\
+	ASAN_ATOMIC_FUNC_SUBTRACT(acq_##name)
+#define ASAN_ATOMIC_FUNC_SUBTRACT_REL(name)				\
+	ASAN_ATOMIC_FUNC_SUBTRACT(rel_##name)
 
-#define _ASAN_ATOMIC_FUNC_SET(name, type)				\
-	void kasan_atomic_set_##name(volatile type *ptr, type val)	\
+#define ASAN_ATOMIC_FUNC_SET(name)					\
+	void								\
+	kasan_atomic_set_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr,			\
+	    KASAN_ATOMIC_TYPE_##name val)				\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		atomic_set_##name(ptr, val);				\
 	}
 
-#define	ASAN_ATOMIC_FUNC_SET(name, type)				\
-	_ASAN_ATOMIC_FUNC_SET(name, type)				\
-	_ASAN_ATOMIC_FUNC_SET(acq_##name, type)				\
-	_ASAN_ATOMIC_FUNC_SET(rel_##name, type)
+#define ASAN_ATOMIC_FUNC_SET_ACQ(name)	ASAN_ATOMIC_FUNC_SET(acq_##name)
+#define ASAN_ATOMIC_FUNC_SET_REL(name)	ASAN_ATOMIC_FUNC_SET(rel_##name)
 
-#define _ASAN_ATOMIC_FUNC_CLEAR(name, type)				\
-	void kasan_atomic_clear_##name(volatile type *ptr, type val)	\
+#define ASAN_ATOMIC_FUNC_CLEAR(name)					\
+	void								\
+	kasan_atomic_clear_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr,			\
+	    KASAN_ATOMIC_TYPE_##name val)				\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		atomic_clear_##name(ptr, val);				\
 	}
 
-#define	ASAN_ATOMIC_FUNC_CLEAR(name, type)				\
-	_ASAN_ATOMIC_FUNC_CLEAR(name, type)				\
-	_ASAN_ATOMIC_FUNC_CLEAR(acq_##name, type)			\
-	_ASAN_ATOMIC_FUNC_CLEAR(rel_##name, type)
+#define ASAN_ATOMIC_FUNC_CLEAR_ACQ(name)				\
+	ASAN_ATOMIC_FUNC_CLEAR(acq_##name)
+#define ASAN_ATOMIC_FUNC_CLEAR_REL(name)				\
+	ASAN_ATOMIC_FUNC_CLEAR(rel_##name)
 
-#define	ASAN_ATOMIC_FUNC_FETCHADD(name, type)				\
-	type kasan_atomic_fetchadd_##name(volatile type *ptr, type val)	\
+#define	ASAN_ATOMIC_FUNC_FETCHADD(name)					\
+	KASAN_ATOMIC_TYPE_##name					\
+	kasan_atomic_fetchadd_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr,			\
+	    KASAN_ATOMIC_TYPE_##name val)				\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		return (atomic_fetchadd_##name(ptr, val));		\
 	}
 
-#define	ASAN_ATOMIC_FUNC_READANDCLEAR(name, type)			\
-	type kasan_atomic_readandclear_##name(volatile type *ptr)	\
+#define	ASAN_ATOMIC_FUNC_READANDCLEAR(name)				\
+	KASAN_ATOMIC_TYPE_##name					\
+	kasan_atomic_readandclear_##name(				\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr)			\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		return (atomic_readandclear_##name(ptr));		\
 	}
 
-#define	ASAN_ATOMIC_FUNC_TESTANDCLEAR(name, type)			\
-	int kasan_atomic_testandclear_##name(volatile type *ptr, u_int v) \
+#define ASAN_ATOMIC_FUNC_TESTANDCLEAR(name)				\
+	int								\
+	kasan_atomic_testandclear_##name(				\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr, u_int v)		\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		return (atomic_testandclear_##name(ptr, v));		\
 	}
 
-#define	ASAN_ATOMIC_FUNC_TESTANDSET(name, type)				\
-	int kasan_atomic_testandset_##name(volatile type *ptr, u_int v) \
+#define ASAN_ATOMIC_FUNC_TESTANDSET(name)				\
+	int								\
+	kasan_atomic_testandset_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr, u_int v)		\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		return (atomic_testandset_##name(ptr, v));		\
 	}
 
-#define	ASAN_ATOMIC_FUNC_SWAP(name, type)				\
-	type kasan_atomic_swap_##name(volatile type *ptr, type val)	\
+#define ASAN_ATOMIC_FUNC_TESTANDSET_ACQ(name)				\
+	ASAN_ATOMIC_FUNC_TESTANDSET(acq_##name)
+
+#define	ASAN_ATOMIC_FUNC_SWAP(name)					\
+	KASAN_ATOMIC_TYPE_##name					\
+	kasan_atomic_swap_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr,			\
+	    KASAN_ATOMIC_TYPE_##name val)				\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		return (atomic_swap_##name(ptr, val));			\
 	}
 
-#define _ASAN_ATOMIC_FUNC_CMPSET(name, type)				\
-	int kasan_atomic_cmpset_##name(volatile type *ptr, type oval,	\
-	    type nval)							\
+#define ASAN_ATOMIC_FUNC_CMPSET(name)					\
+	int								\
+	kasan_atomic_cmpset_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr,			\
+	    KASAN_ATOMIC_TYPE_##name oval,				\
+	    KASAN_ATOMIC_TYPE_##name nval)				\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		return (atomic_cmpset_##name(ptr, oval, nval));		\
 	}
 
-#define	ASAN_ATOMIC_FUNC_CMPSET(name, type)				\
-	_ASAN_ATOMIC_FUNC_CMPSET(name, type)				\
-	_ASAN_ATOMIC_FUNC_CMPSET(acq_##name, type)			\
-	_ASAN_ATOMIC_FUNC_CMPSET(rel_##name, type)
+#define ASAN_ATOMIC_FUNC_CMPSET_ACQ(name)				\
+	ASAN_ATOMIC_FUNC_CMPSET(acq_##name)
+#define ASAN_ATOMIC_FUNC_CMPSET_REL(name)				\
+	ASAN_ATOMIC_FUNC_CMPSET(rel_##name)
 
-#define _ASAN_ATOMIC_FUNC_FCMPSET(name, type)				\
-	int kasan_atomic_fcmpset_##name(volatile type *ptr, type *oval,	\
-	    type nval)							\
+#define ASAN_ATOMIC_FUNC_FCMPSET(name)					\
+	int								\
+	kasan_atomic_fcmpset_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr,			\
+	    KASAN_ATOMIC_TYPE_##name *oval,				\
+	    KASAN_ATOMIC_TYPE_##name nval)				\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		return (atomic_fcmpset_##name(ptr, oval, nval));	\
 	}
 
-#define	ASAN_ATOMIC_FUNC_FCMPSET(name, type)				\
-	_ASAN_ATOMIC_FUNC_FCMPSET(name, type)				\
-	_ASAN_ATOMIC_FUNC_FCMPSET(acq_##name, type)			\
-	_ASAN_ATOMIC_FUNC_FCMPSET(rel_##name, type)
+#define ASAN_ATOMIC_FUNC_FCMPSET_ACQ(name)				\
+	ASAN_ATOMIC_FUNC_FCMPSET(acq_##name)
+#define ASAN_ATOMIC_FUNC_FCMPSET_REL(name)				\
+	ASAN_ATOMIC_FUNC_FCMPSET(rel_##name)
 
 #define ASAN_ATOMIC_FUNC_THREAD_FENCE(name)				\
-	void kasan_atomic_thread_fence_##name(void)			\
+	void								\
+	kasan_atomic_thread_fence_##name(void)				\
 	{								\
 		atomic_thread_fence_##name();				\
 	}
 
-#define	_ASAN_ATOMIC_FUNC_LOAD(name, type)				\
-	type kasan_atomic_load_##name(const volatile type *ptr)		\
+#define	ASAN_ATOMIC_FUNC_LOAD(name)					\
+	KASAN_ATOMIC_TYPE_##name					\
+	kasan_atomic_load_##name(					\
+	    const volatile KASAN_ATOMIC_TYPE_##name *ptr)		\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		return (atomic_load_##name(ptr));			\
 	}
 
-#define	ASAN_ATOMIC_FUNC_LOAD(name, type)				\
-	_ASAN_ATOMIC_FUNC_LOAD(name, type)				\
-	_ASAN_ATOMIC_FUNC_LOAD(acq_##name, type)
+#define ASAN_ATOMIC_FUNC_LOAD_ACQ(name)					\
+	ASAN_ATOMIC_FUNC_LOAD(acq_##name)
 
-#define	_ASAN_ATOMIC_FUNC_STORE(name, type)				\
-	void kasan_atomic_store_##name(volatile type *ptr, type val)	\
+#define	ASAN_ATOMIC_FUNC_STORE(name)					\
+	void								\
+	kasan_atomic_store_##name(					\
+	    volatile KASAN_ATOMIC_TYPE_##name *ptr,			\
+	    KASAN_ATOMIC_TYPE_##name val)				\
 	{								\
-		kasan_shadow_check((uintptr_t)ptr, sizeof(type), true,	\
+		kasan_shadow_check((uintptr_t)ptr,			\
+		    sizeof(KASAN_ATOMIC_TYPE_##name), true,		\
 		    __RET_ADDR);					\
 		atomic_store_##name(ptr, val);				\
 	}
 
-#define	ASAN_ATOMIC_FUNC_STORE(name, type)				\
-	_ASAN_ATOMIC_FUNC_STORE(name, type)				\
-	_ASAN_ATOMIC_FUNC_STORE(rel_##name, type)
+#define ASAN_ATOMIC_FUNC_STORE_REL(name)				\
+	ASAN_ATOMIC_FUNC_STORE(rel_##name)
 
-ASAN_ATOMIC_FUNC_ADD(8, uint8_t);
-ASAN_ATOMIC_FUNC_ADD(16, uint16_t);
-ASAN_ATOMIC_FUNC_ADD(32, uint32_t);
-ASAN_ATOMIC_FUNC_ADD(64, uint64_t);
-ASAN_ATOMIC_FUNC_ADD(int, u_int);
-ASAN_ATOMIC_FUNC_ADD(long, u_long);
-ASAN_ATOMIC_FUNC_ADD(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_ADD_WIDTH(ASAN_ATOMIC_FUNC_ADD)
+ARCH_SUPPORT_ATOMIC_ADD_ACQ_WIDTH(ASAN_ATOMIC_FUNC_ADD_ACQ)
+ARCH_SUPPORT_ATOMIC_ADD_REL_WIDTH(ASAN_ATOMIC_FUNC_ADD_REL)
 
-ASAN_ATOMIC_FUNC_SUBTRACT(8, uint8_t);
-ASAN_ATOMIC_FUNC_SUBTRACT(16, uint16_t);
-ASAN_ATOMIC_FUNC_SUBTRACT(32, uint32_t);
-ASAN_ATOMIC_FUNC_SUBTRACT(64, uint64_t);
-ASAN_ATOMIC_FUNC_SUBTRACT(int, u_int);
-ASAN_ATOMIC_FUNC_SUBTRACT(long, u_long);
-ASAN_ATOMIC_FUNC_SUBTRACT(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_SUBTRACT_WIDTH(ASAN_ATOMIC_FUNC_SUBTRACT)
+ARCH_SUPPORT_ATOMIC_SUBTRACT_ACQ_WIDTH(ASAN_ATOMIC_FUNC_SUBTRACT_ACQ)
+ARCH_SUPPORT_ATOMIC_SUBTRACT_REL_WIDTH(ASAN_ATOMIC_FUNC_SUBTRACT_REL)
 
-ASAN_ATOMIC_FUNC_SET(8, uint8_t);
-ASAN_ATOMIC_FUNC_SET(16, uint16_t);
-ASAN_ATOMIC_FUNC_SET(32, uint32_t);
-ASAN_ATOMIC_FUNC_SET(64, uint64_t);
-ASAN_ATOMIC_FUNC_SET(int, u_int);
-ASAN_ATOMIC_FUNC_SET(long, u_long);
-ASAN_ATOMIC_FUNC_SET(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_SET_WIDTH(ASAN_ATOMIC_FUNC_SET)
+ARCH_SUPPORT_ATOMIC_SET_ACQ_WIDTH(ASAN_ATOMIC_FUNC_SET_ACQ)
+ARCH_SUPPORT_ATOMIC_SET_REL_WIDTH(ASAN_ATOMIC_FUNC_SET_REL)
 
-ASAN_ATOMIC_FUNC_CLEAR(8, uint8_t);
-ASAN_ATOMIC_FUNC_CLEAR(16, uint16_t);
-ASAN_ATOMIC_FUNC_CLEAR(32, uint32_t);
-ASAN_ATOMIC_FUNC_CLEAR(64, uint64_t);
-ASAN_ATOMIC_FUNC_CLEAR(int, u_int);
-ASAN_ATOMIC_FUNC_CLEAR(long, u_long);
-ASAN_ATOMIC_FUNC_CLEAR(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_CLEAR_WIDTH(ASAN_ATOMIC_FUNC_CLEAR)
+ARCH_SUPPORT_ATOMIC_CLEAR_ACQ_WIDTH(ASAN_ATOMIC_FUNC_CLEAR_ACQ)
+ARCH_SUPPORT_ATOMIC_CLEAR_REL_WIDTH(ASAN_ATOMIC_FUNC_CLEAR_REL)
 
-ASAN_ATOMIC_FUNC_FETCHADD(32, uint32_t);
-ASAN_ATOMIC_FUNC_FETCHADD(64, uint64_t);
-ASAN_ATOMIC_FUNC_FETCHADD(int, u_int);
-ASAN_ATOMIC_FUNC_FETCHADD(long, u_long);
+ARCH_SUPPORT_ATOMIC_FETCHADD_WIDTH(ASAN_ATOMIC_FUNC_FETCHADD)
 
-ASAN_ATOMIC_FUNC_READANDCLEAR(32, uint32_t);
-ASAN_ATOMIC_FUNC_READANDCLEAR(64, uint64_t);
-ASAN_ATOMIC_FUNC_READANDCLEAR(int, u_int);
-ASAN_ATOMIC_FUNC_READANDCLEAR(long, u_long);
-ASAN_ATOMIC_FUNC_READANDCLEAR(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_READANDCLEAR_WIDTH(ASAN_ATOMIC_FUNC_READANDCLEAR)
 
-ASAN_ATOMIC_FUNC_TESTANDCLEAR(32, uint32_t);
-ASAN_ATOMIC_FUNC_TESTANDCLEAR(64, uint64_t);
-ASAN_ATOMIC_FUNC_TESTANDCLEAR(int, u_int);
-ASAN_ATOMIC_FUNC_TESTANDCLEAR(long, u_long);
-ASAN_ATOMIC_FUNC_TESTANDCLEAR(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_TESTANDCLEAR_WIDTH(ASAN_ATOMIC_FUNC_TESTANDCLEAR)
 
-ASAN_ATOMIC_FUNC_TESTANDSET(32, uint32_t);
-ASAN_ATOMIC_FUNC_TESTANDSET(64, uint64_t);
-ASAN_ATOMIC_FUNC_TESTANDSET(int, u_int);
-ASAN_ATOMIC_FUNC_TESTANDSET(long, u_long);
-ASAN_ATOMIC_FUNC_TESTANDSET(acq_long, u_long);
-ASAN_ATOMIC_FUNC_TESTANDSET(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_TESTANDSET_WIDTH(ASAN_ATOMIC_FUNC_TESTANDSET)
+ARCH_SUPPORT_ATOMIC_TESTANDSET_ACQ_WIDTH(ASAN_ATOMIC_FUNC_TESTANDSET_ACQ)
 
-ASAN_ATOMIC_FUNC_SWAP(32, uint32_t);
-ASAN_ATOMIC_FUNC_SWAP(64, uint64_t);
-ASAN_ATOMIC_FUNC_SWAP(int, u_int);
-ASAN_ATOMIC_FUNC_SWAP(long, u_long);
-ASAN_ATOMIC_FUNC_SWAP(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_SWAP_WIDTH(ASAN_ATOMIC_FUNC_SWAP)
 
-ASAN_ATOMIC_FUNC_CMPSET(8, uint8_t);
-ASAN_ATOMIC_FUNC_CMPSET(16, uint16_t);
-ASAN_ATOMIC_FUNC_CMPSET(32, uint32_t);
-ASAN_ATOMIC_FUNC_CMPSET(64, uint64_t);
-ASAN_ATOMIC_FUNC_CMPSET(int, u_int);
-ASAN_ATOMIC_FUNC_CMPSET(long, u_long);
-ASAN_ATOMIC_FUNC_CMPSET(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_CMPSET_WIDTH(ASAN_ATOMIC_FUNC_CMPSET)
+ARCH_SUPPORT_ATOMIC_CMPSET_ACQ_WIDTH(ASAN_ATOMIC_FUNC_CMPSET_ACQ)
+ARCH_SUPPORT_ATOMIC_CMPSET_REL_WIDTH(ASAN_ATOMIC_FUNC_CMPSET_REL)
 
-ASAN_ATOMIC_FUNC_FCMPSET(8, uint8_t);
-ASAN_ATOMIC_FUNC_FCMPSET(16, uint16_t);
-ASAN_ATOMIC_FUNC_FCMPSET(32, uint32_t);
-ASAN_ATOMIC_FUNC_FCMPSET(64, uint64_t);
-ASAN_ATOMIC_FUNC_FCMPSET(int, u_int);
-ASAN_ATOMIC_FUNC_FCMPSET(long, u_long);
-ASAN_ATOMIC_FUNC_FCMPSET(ptr, uintptr_t);
+ARCH_SUPPORT_ATOMIC_FCMPSET_WIDTH(ASAN_ATOMIC_FUNC_FCMPSET)
+ARCH_SUPPORT_ATOMIC_FCMPSET_ACQ_WIDTH(ASAN_ATOMIC_FUNC_FCMPSET_ACQ)
+ARCH_SUPPORT_ATOMIC_FCMPSET_REL_WIDTH(ASAN_ATOMIC_FUNC_FCMPSET_REL)
 
-_ASAN_ATOMIC_FUNC_LOAD(bool, bool);
-ASAN_ATOMIC_FUNC_LOAD(8, uint8_t);
-ASAN_ATOMIC_FUNC_LOAD(16, uint16_t);
-ASAN_ATOMIC_FUNC_LOAD(32, uint32_t);
-ASAN_ATOMIC_FUNC_LOAD(64, uint64_t);
-ASAN_ATOMIC_FUNC_LOAD(char, u_char);
-ASAN_ATOMIC_FUNC_LOAD(short, u_short);
-ASAN_ATOMIC_FUNC_LOAD(int, u_int);
-ASAN_ATOMIC_FUNC_LOAD(long, u_long);
-ASAN_ATOMIC_FUNC_LOAD(ptr, uintptr_t);
+ASAN_ATOMIC_FUNC_LOAD(bool);
+ARCH_SUPPORT_ATOMIC_LOAD_WIDTH(ASAN_ATOMIC_FUNC_LOAD)
+ARCH_SUPPORT_ATOMIC_LOAD_ACQ_WIDTH(ASAN_ATOMIC_FUNC_LOAD_ACQ)
 
-_ASAN_ATOMIC_FUNC_STORE(bool, bool);
-ASAN_ATOMIC_FUNC_STORE(8, uint8_t);
-ASAN_ATOMIC_FUNC_STORE(16, uint16_t);
-ASAN_ATOMIC_FUNC_STORE(32, uint32_t);
-ASAN_ATOMIC_FUNC_STORE(64, uint64_t);
-ASAN_ATOMIC_FUNC_STORE(char, u_char);
-ASAN_ATOMIC_FUNC_STORE(short, u_short);
-ASAN_ATOMIC_FUNC_STORE(int, u_int);
-ASAN_ATOMIC_FUNC_STORE(long, u_long);
-ASAN_ATOMIC_FUNC_STORE(ptr, uintptr_t);
+ASAN_ATOMIC_FUNC_STORE(bool);
+ARCH_SUPPORT_ATOMIC_STORE_WIDTH(ASAN_ATOMIC_FUNC_STORE)
+ARCH_SUPPORT_ATOMIC_STORE_REL_WIDTH(ASAN_ATOMIC_FUNC_STORE_REL)
 
 ASAN_ATOMIC_FUNC_THREAD_FENCE(acq);
 ASAN_ATOMIC_FUNC_THREAD_FENCE(rel);
