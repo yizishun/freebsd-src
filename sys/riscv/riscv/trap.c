@@ -37,6 +37,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/asan.h>
 #include <sys/bus.h>
 #include <sys/intr.h>
 #include <sys/kernel.h>
@@ -308,6 +309,8 @@ do_trap_supervisor(struct trapframe *frame)
 {
 	uint64_t exception;
 
+	kasan_mark(frame, sizeof(*frame), sizeof(*frame), 0);
+
 	/* Ensure we came from supervisor mode, interrupts disabled */
 	KASSERT((csr_read(sstatus) & (SSTATUS_SPP | SSTATUS_SIE)) ==
 	    SSTATUS_SPP, ("Came from S mode with interrupts enabled"));
@@ -383,6 +386,8 @@ do_trap_user(struct trapframe *frame)
 	struct thread *td;
 	struct pcb *pcb;
 
+	kasan_mark(frame, sizeof(*frame), sizeof(*frame), 0);
+	
 	td = curthread;
 	pcb = td->td_pcb;
 

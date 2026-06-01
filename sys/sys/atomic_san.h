@@ -406,4 +406,141 @@ ATOMIC_SAN_THREAD_FENCE(SAN_INTERCEPTOR_PREFIX);
 
 #endif /* !SAN_RUNTIME */
 
+/*
+ * The following x-macros control the generation of ASAN interceptor functions
+ * in subr_asan.c.
+ * 
+ * By default, the MI code(atomic_san.h) assumes that the underlying
+ * architecture supports all atomic operations across all widths. If a specific
+ * MD architecture(machine/atomic.h) lacks support for certain atomic widths
+ * (e.g., 8-bit or 16-bit), it should override these ARCH_SUPPORT_* macros in
+ * its machine/atomic.h and #undef the corresponding atomic_* macros to prevent
+ * the generation of unsupported interceptors.
+ */
+
+#ifndef ARCH_SUPPORT_ATOMIC_ADD_WIDTH
+#define ARCH_SUPPORT_ATOMIC_ADD_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_ADD_ACQ_WIDTH
+#define ARCH_SUPPORT_ATOMIC_ADD_ACQ_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_ADD_REL_WIDTH
+#define ARCH_SUPPORT_ATOMIC_ADD_REL_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_SUBTRACT_WIDTH
+#define ARCH_SUPPORT_ATOMIC_SUBTRACT_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_SUBTRACT_ACQ_WIDTH
+#define ARCH_SUPPORT_ATOMIC_SUBTRACT_ACQ_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_SUBTRACT_REL_WIDTH
+#define ARCH_SUPPORT_ATOMIC_SUBTRACT_REL_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_SET_WIDTH
+#define ARCH_SUPPORT_ATOMIC_SET_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_SET_ACQ_WIDTH
+#define ARCH_SUPPORT_ATOMIC_SET_ACQ_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_SET_REL_WIDTH
+#define ARCH_SUPPORT_ATOMIC_SET_REL_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_CLEAR_WIDTH
+#define ARCH_SUPPORT_ATOMIC_CLEAR_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_CLEAR_ACQ_WIDTH
+#define ARCH_SUPPORT_ATOMIC_CLEAR_ACQ_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_CLEAR_REL_WIDTH
+#define ARCH_SUPPORT_ATOMIC_CLEAR_REL_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_CMPSET_WIDTH
+#define ARCH_SUPPORT_ATOMIC_CMPSET_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_CMPSET_ACQ_WIDTH
+#define ARCH_SUPPORT_ATOMIC_CMPSET_ACQ_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_CMPSET_REL_WIDTH
+#define ARCH_SUPPORT_ATOMIC_CMPSET_REL_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_FCMPSET_WIDTH
+#define ARCH_SUPPORT_ATOMIC_FCMPSET_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_FCMPSET_ACQ_WIDTH
+#define ARCH_SUPPORT_ATOMIC_FCMPSET_ACQ_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_FCMPSET_REL_WIDTH
+#define ARCH_SUPPORT_ATOMIC_FCMPSET_REL_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_FETCHADD_WIDTH
+#define ARCH_SUPPORT_ATOMIC_FETCHADD_WIDTH(X) \
+	X(32) X(int) X(64) X(long)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_READANDCLEAR_WIDTH
+#define ARCH_SUPPORT_ATOMIC_READANDCLEAR_WIDTH(X) \
+	X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_SWAP_WIDTH
+#define ARCH_SUPPORT_ATOMIC_SWAP_WIDTH(X) \
+	X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_TESTANDSET_WIDTH
+#define ARCH_SUPPORT_ATOMIC_TESTANDSET_WIDTH(X) \
+	X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_TESTANDSET_ACQ_WIDTH
+#define ARCH_SUPPORT_ATOMIC_TESTANDSET_ACQ_WIDTH(X) \
+	X(long)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_TESTANDCLEAR_WIDTH
+#define ARCH_SUPPORT_ATOMIC_TESTANDCLEAR_WIDTH(X) \
+	X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_LOAD_WIDTH
+#define ARCH_SUPPORT_ATOMIC_LOAD_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_LOAD_ACQ_WIDTH
+#define ARCH_SUPPORT_ATOMIC_LOAD_ACQ_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
+#ifndef ARCH_SUPPORT_ATOMIC_STORE_WIDTH
+#define ARCH_SUPPORT_ATOMIC_STORE_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+#ifndef ARCH_SUPPORT_ATOMIC_STORE_REL_WIDTH
+#define ARCH_SUPPORT_ATOMIC_STORE_REL_WIDTH(X) \
+	X(8) X(char) X(16) X(short) X(32) X(int) X(64) X(long) X(ptr)
+#endif
+
 #endif /* !_SYS_ATOMIC_SAN_H_ */
