@@ -593,6 +593,52 @@ nl_sosend(struct socket *so, struct sockaddr *addr, struct uio *uio,
         NL_LOG(LOG_DEBUG2, "sending message to kernel %u bytes", nb->datalen);
 
 	SOCK_SENDBUF_LOCK(so);
+
+	/* Sync path */
+	if (nlp->nl_flags & NLF_SND_SYNC) {
+		/*
+		 * Wait for the queue to drain completely to prevent
+		 * out-of-order execution of requests.
+		 */
+		while (!TAILQ_EMPTY(&sb->nl_queue)) {
+			/* To avoid potential deadlock, we kick the async path */
+			NLP_LOCK(nlp);
+			nl_schedule_taskqueue(nlp);
+			NLP_UNLOCK(nlp);
+
+			if ((so->so_state & SS_NBIO) ||
+			    (flags & (MSG_NBIO | MSG_DONTWAIT)) != 0) {
+				SOCK_SENDBUF_UNLOCK(so);
+				error = EWOULDBLOCK;
+				goto out;
+			}
+
+			error = mtx_sleep(&sb->nl_queue, SOCK_SENDBUF_MTX(so),
+			    PCATCH, "nlsync", hz);
+			if (error != 0) {
+				/*
+				 * Timeout, possibly indicating that the recv
+				 * buffer is full. We need to notify the user to
+				 * read it.
+				 */
+				if (error == EWOULDBLOCK) {
+					error = ENOBUFS;
+				}
+				SOCK_SENDBUF_UNLOCK(so);
+				goto out;
+			}
+		}
+		SOCK_SENDBUF_UNLOCK(so);
+
+		error = nl_process_nbuf_sync(so, nb, nlp);
+		if (error == 0) {
+			NL_LOG(LOG_DEBUG3, "success");
+			nl_buf_free(nb);
+			nb = NULL;
+		}
+		goto out;
+	}
+
 restart:
 	if (sb->sb_hiwat - sb->sb_ccc >= nb->datalen) {
 		TAILQ_INSERT_TAIL(&sb->nl_queue, nb, tailq);
@@ -840,6 +886,8 @@ nl_getoptflag(int sopt_name)
 		return (NLF_STRICT);
 	case NETLINK_MSG_INFO:
 		return (NLF_MSG_INFO);
+	case NETLINK_SND_SYNC:
+		return (NLF_SND_SYNC);
 	}
 
 	return (0);
@@ -881,13 +929,15 @@ nl_ctloutput(struct socket *so, struct sockopt *sopt)
 		case NETLINK_EXT_ACK:
 		case NETLINK_GET_STRICT_CHK:
 		case NETLINK_MSG_INFO:
+		case NETLINK_SND_SYNC:
 			error = sooptcopyin(sopt, &optval, sizeof(optval), sizeof(optval));
 			if (error != 0)
 				break;
 
 			flag = nl_getoptflag(sopt->sopt_name);
 
-			if ((flag == NLF_MSG_INFO) && nlp->nl_linux) {
+			if ((flag == NLF_MSG_INFO || flag == NLF_SND_SYNC) &&
+			    nlp->nl_linux) {
 				error = EINVAL;
 				break;
 			}
@@ -915,6 +965,7 @@ nl_ctloutput(struct socket *so, struct sockopt *sopt)
 		case NETLINK_EXT_ACK:
 		case NETLINK_GET_STRICT_CHK:
 		case NETLINK_MSG_INFO:
+		case NETLINK_SND_SYNC:
 			NLCTL_RLOCK();
 			optval = (nlp->nl_flags & nl_getoptflag(sopt->sopt_name)) != 0;
 			NLCTL_RUNLOCK();

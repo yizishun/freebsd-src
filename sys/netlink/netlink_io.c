@@ -133,6 +133,8 @@ nl_process_received_one(struct nlpcb *nlp)
 			break;
 		}
 	}
+	if (TAILQ_EMPTY(&sb->nl_queue))
+		wakeup(&sb->nl_queue);
 	SOCK_SENDBUF_UNLOCK(so);
 
 	return (reschedule);
@@ -367,4 +369,29 @@ nl_process_nbuf(struct nl_buf *nb, struct nlpcb *nlp)
 		return (false);
 	} else
 		return (true);
+}
+
+int
+nl_process_nbuf_sync(struct socket *so, struct nl_buf *nb, struct nlpcb *nlp)
+{
+
+	struct sockbuf *sb = &so->so_rcv;
+
+	/*
+	 * Do not process queued up requests if there is no space to queue
+	 * replies.
+	 */
+	SOCK_RECVBUF_LOCK(so);
+	if (sb->sb_hiwat <= sb->sb_ccc) {
+		SOCK_RECVBUF_UNLOCK(so);
+		NL_LOG(LOG_DEBUG3, "socket %p stuck", so);
+		return (ENOBUFS);
+	}
+	SOCK_RECVBUF_UNLOCK(so);
+
+	if (!nl_process_nbuf(nb, nlp)) {
+		return (ENOBUFS);
+	}
+
+	return (0);
 }
