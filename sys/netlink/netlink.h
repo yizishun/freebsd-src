@@ -79,7 +79,7 @@ struct sockaddr_nl {
 #define NETLINK_DROP_MEMBERSHIP		2 /* Unsubscribe from the specified group */
 #define NETLINK_PKTINFO			3 /* XXX: not supported */
 #define NETLINK_BROADCAST_ERROR		4 /* XXX: not supported */
-#define NETLINK_NO_ENOBUFS		5 /* XXX: not supported */
+#define NETLINK_NO_ENOBUFS		5 /* Suppress ENOBUFS on receive buffer overflow */
 #define NETLINK_RX_RING			6 /* XXX: not supported */
 #define NETLINK_TX_RING			7 /* XXX: not supported */
 #define NETLINK_LISTEN_ALL_NSID		8 /* XXX: not supported */

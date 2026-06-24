@@ -154,33 +154,6 @@ nl_process_received(struct nlpcb *nlp)
 		;
 }
 
-/*
- * Called after some data have been read from the socket.
- */
-void
-nl_on_transmit(struct nlpcb *nlp)
-{
-	NLP_LOCK(nlp);
-
-	struct socket *so = nlp->nl_socket;
-	if (__predict_false(nlp->nl_dropped_bytes > 0 && so != NULL)) {
-		unsigned long dropped_bytes = nlp->nl_dropped_bytes;
-		unsigned long dropped_messages = nlp->nl_dropped_messages;
-		nlp->nl_dropped_bytes = 0;
-		nlp->nl_dropped_messages = 0;
-
-		struct sockbuf *sb = &so->so_rcv;
-		NLP_LOG(LOG_DEBUG, nlp,
-		    "socket RX overflowed, %lu messages (%lu bytes) dropped. "
-		    "bytes: [%u/%u]", dropped_messages, dropped_bytes,
-		    sb->sb_ccc, sb->sb_hiwat);
-		/* TODO: send netlink message */
-	}
-
-	nl_schedule_taskqueue(nlp);
-	NLP_UNLOCK(nlp);
-}
-
 void
 nl_taskqueue_handler(void *_arg, int pending)
 {

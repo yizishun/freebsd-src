@@ -91,6 +91,7 @@ struct nlpcb {
 #define NLF_EXT_ACK             0x02 /* Allow including extended TLVs in ack */
 #define	NLF_STRICT		0x04 /* Perform strict header checks */
 #define	NLF_MSG_INFO		0x08 /* Send caller info along with the notifications */
+#define	NLF_NO_ENOBUFS		0x10 /* Do not report ENOBUFS on RX overflow */
 
 SYSCTL_DECL(_net_netlink);
 SYSCTL_DECL(_net_netlink_debug);
@@ -130,7 +131,6 @@ void nl_set_thread_nlp(struct thread *td, struct nlpcb *nlp);
 bool nl_send(struct nl_writer *, struct nlpcb *);
 void nlmsg_ack(struct nlpcb *nlp, int error, struct nlmsghdr *nlmsg,
     struct nl_pstate *npt);
-void nl_on_transmit(struct nlpcb *nlp);
 
 void nl_taskqueue_handler(void *_arg, int pending);
 void nl_schedule_taskqueue(struct nlpcb *nlp);

@@ -696,8 +696,53 @@ nl_soreceive(struct socket *so, struct sockaddr **psa, struct uio *uio,
 	msgrcv = 0;
 	datalen = 0;
 
+	if (__predict_false(nlp->nl_dropped_bytes > 0)) {
+		NLP_LOCK(nlp);
+		uint64_t dropped_bytes = nlp->nl_dropped_bytes;
+		uint64_t dropped_messages = nlp->nl_dropped_messages;
+		NLP_UNLOCK(nlp);
+
+		if (dropped_bytes > 0) {
+			NLP_LOG(LOG_DEBUG, nlp,
+			    "socket RX overflowed, %ju messages (%ju bytes) dropped. "
+			    "bytes: [%u/%u]", (uintmax_t)dropped_messages, (uintmax_t)dropped_bytes,
+			    sb->sb_ccc, sb->sb_hiwat);
+			if (nlp->nl_linux) {
+				NLP_LOCK(nlp);
+				nlp->nl_dropped_bytes -= dropped_bytes;
+				nlp->nl_dropped_messages -= dropped_messages;
+				NLP_UNLOCK(nlp);
+				if (!(nlp->nl_flags & NLF_NO_ENOBUFS)) {
+					SOCK_IO_RECV_UNLOCK(so);
+					return (ENOBUFS);
+				}
+			} else {
+				if (uio->uio_resid >= sizeof(struct nlmsghdr)) {
+					struct nlmsghdr overrun = {
+						.nlmsg_len = sizeof(struct nlmsghdr),
+						.nlmsg_type = NLMSG_OVERRUN
+						/* XXX: could add dropped_{messages,bytes} as payload */
+					};
+					error = uiomove(&overrun, sizeof(overrun), uio);
+					if (error != 0) {
+						SOCK_IO_RECV_UNLOCK(so);
+						return (error);
+					}
+
+					if (!peek) {
+						NLP_LOCK(nlp);
+						nlp->nl_dropped_bytes -= dropped_bytes;
+						nlp->nl_dropped_messages -= dropped_messages;
+						NLP_UNLOCK(nlp);
+					}
+					msgrcv++;
+				}
+			}
+		}
+	}
+
 	SOCK_RECVBUF_LOCK(so);
-	while ((first = TAILQ_FIRST(&sb->nl_queue)) == NULL) {
+	while ((first = TAILQ_FIRST(&sb->nl_queue)) == NULL && msgrcv == 0) {
 		if (nonblock) {
 			SOCK_RECVBUF_UNLOCK(so);
 			SOCK_IO_RECV_UNLOCK(so);
@@ -823,7 +868,9 @@ nospace:
 
 	SOCK_IO_RECV_UNLOCK(so);
 
-	nl_on_transmit(sotonlpcb(so));
+	NLP_LOCK(nlp);
+	nl_schedule_taskqueue(nlp);
+	NLP_UNLOCK(nlp);
 
 	return (error);
 }
@@ -840,6 +887,8 @@ nl_getoptflag(int sopt_name)
 		return (NLF_STRICT);
 	case NETLINK_MSG_INFO:
 		return (NLF_MSG_INFO);
+	case NETLINK_NO_ENOBUFS:
+		return (NLF_NO_ENOBUFS);
 	}
 
 	return (0);
@@ -881,6 +930,7 @@ nl_ctloutput(struct socket *so, struct sockopt *sopt)
 		case NETLINK_EXT_ACK:
 		case NETLINK_GET_STRICT_CHK:
 		case NETLINK_MSG_INFO:
+		case NETLINK_NO_ENOBUFS:
 			error = sooptcopyin(sopt, &optval, sizeof(optval), sizeof(optval));
 			if (error != 0)
 				break;
@@ -915,6 +965,7 @@ nl_ctloutput(struct socket *so, struct sockopt *sopt)
 		case NETLINK_EXT_ACK:
 		case NETLINK_GET_STRICT_CHK:
 		case NETLINK_MSG_INFO:
+		case NETLINK_NO_ENOBUFS:
 			NLCTL_RLOCK();
 			optval = (nlp->nl_flags & nl_getoptflag(sopt->sopt_name)) != 0;
 			NLCTL_RUNLOCK();
