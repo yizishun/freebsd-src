@@ -131,7 +131,6 @@ void nl_set_thread_nlp(struct thread *td, struct nlpcb *nlp);
 bool nl_send(struct nl_writer *, struct nlpcb *);
 void nlmsg_ack(struct nlpcb *nlp, int error, struct nlmsghdr *nlmsg,
     struct nl_pstate *npt);
-void nl_on_transmit(struct nlpcb *nlp);
 
 void nl_taskqueue_handler(void *_arg, int pending);
 void nl_schedule_taskqueue(struct nlpcb *nlp);

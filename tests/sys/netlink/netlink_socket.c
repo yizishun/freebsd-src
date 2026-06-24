@@ -357,6 +357,31 @@ ATF_TC_BODY(membership, tc)
 	    sizeof(struct in_addr)) == 0);
 }
 
+static int
+fullsocket_sync(void)
+{
+	socklen_t slen = sizeof(int);
+	int fd, sendspace, recvspace, recvavail;
+	int val = 1;
+
+	ATF_REQUIRE((fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_GENERIC)) != -1);
+	ATF_REQUIRE(setsockopt(fd, SOL_NETLINK, NETLINK_SND_SYNC, &val, slen) != -1);
+	ATF_REQUIRE(getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sendspace,
+	    &slen) == 0);
+	ATF_REQUIRE(getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &recvspace,
+	    &slen) == 0);
+
+	/*
+	 * Flood the socket with requests, without reading out the replies.
+	 * In sync mode, send() will never fail even if recv buffer is full.
+	 */
+	do {
+		ATF_REQUIRE(send(fd, &hdr, sizeof(hdr), MSG_DONTWAIT) == sizeof(hdr));
+		ATF_REQUIRE(ioctl(fd, FIONREAD, &recvavail) != -1);
+	} while (recvavail < recvspace);
+	return (fd);
+}
+
 ATF_TC(sync);
 ATF_TC_HEAD(sync, tc)
 {
@@ -376,6 +401,13 @@ ATF_TC_BODY(sync, tc)
 	ATF_REQUIRE(ioctl(fd, FIONWRITE, &sendsize) != -1);
 	ATF_REQUIRE_EQ(sendsize, 0);
 	ATF_REQUIRE(recv(fd, buf, sizeof(hdr), 0) == sizeof(hdr));
+
+	/* Recv buffer full */
+	fd = fullsocket_sync();
+	ATF_REQUIRE(send(fd, &hdr, sizeof(hdr), 0) == sizeof(hdr));
+	ATF_REQUIRE(recv(fd, buf, BUFLEN, 0) == -1);
+	ATF_REQUIRE(errno == ENOBUFS);
+	ATF_REQUIRE(recv(fd, buf, BUFLEN, 0) > sizeof(hdr));
 
 	/* async to sync mid-session */
 	fd = fullsocket();

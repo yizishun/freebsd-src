@@ -705,6 +705,25 @@ nl_soreceive(struct socket *so, struct sockaddr **psa, struct uio *uio,
 	if (__predict_false(error))
 		return (error);
 
+	if (__predict_false(nlp->nl_dropped_bytes > 0)) {
+		NLP_LOCK(nlp);
+		uint64_t dropped_bytes = nlp->nl_dropped_bytes;
+		uint64_t dropped_messages = nlp->nl_dropped_messages;
+		nlp->nl_dropped_bytes = 0;
+		nlp->nl_dropped_messages = 0;
+		NLP_UNLOCK(nlp);
+
+		if (dropped_bytes > 0) {
+			NLP_LOG(LOG_DEBUG, nlp,
+			    "socket RX overflowed, %lu messages (%lu bytes) dropped. "
+			    "bytes: [%u/%u]", dropped_messages, dropped_bytes,
+			    sb->sb_ccc, sb->sb_hiwat);
+			/* TODO: Send NLMSG_OVERRUN notification here */
+			SOCK_IO_RECV_UNLOCK(so);
+			return (ENOBUFS);
+		}
+	}
+
 	len = 0;
 	overflow = 0;
 	msgrcv = 0;
@@ -837,7 +856,11 @@ nospace:
 
 	SOCK_IO_RECV_UNLOCK(so);
 
-	nl_on_transmit(sotonlpcb(so));
+	if ((nlp->nl_flags & NLF_SND_SYNC) == 0) {
+		NLP_LOCK(nlp);
+		nl_schedule_taskqueue(nlp);
+		NLP_UNLOCK(nlp);
+	}
 
 	return (error);
 }
