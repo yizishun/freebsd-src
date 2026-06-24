@@ -51,8 +51,6 @@ _DECLARE_DEBUG(LOG_INFO);
  * sending netlink data between the kernel and userland.
  */
 
-static bool nl_process_nbuf(struct nl_buf *nb, struct nlpcb *nlp);
-
 struct nl_buf *
 nl_buf_alloc(size_t len, int mflag)
 {
@@ -119,9 +117,9 @@ nl_process_received_one(struct nlpcb *nlp)
 	while ((nb = TAILQ_FIRST(&sb->nl_queue)) != NULL) {
 		TAILQ_REMOVE(&sb->nl_queue, nb, tailq);
 		SOCK_SENDBUF_UNLOCK(so);
-		reschedule = nl_process_nbuf(nb, nlp);
+		reschedule = nl_process_nbuf(nb, nlp, false);
 		SOCK_SENDBUF_LOCK(so);
-		if (reschedule) {
+		if (!reschedule) {
 			sb->sb_acc -= nb->datalen;
 			sb->sb_ccc -= nb->datalen;
 			/* XXXGL: potentially can reduce lock&unlock count. */
@@ -293,8 +291,8 @@ npt_clear(struct nl_pstate *npt)
 /*
  * Processes an incoming packet, which can contain multiple netlink messages
  */
-static bool
-nl_process_nbuf(struct nl_buf *nb, struct nlpcb *nlp)
+int
+nl_process_nbuf(struct nl_buf *nb, struct nlpcb *nlp, bool sync)
 {
 	struct nl_writer nw;
 	struct nlmsghdr *hdr;
@@ -304,10 +302,12 @@ nl_process_nbuf(struct nl_buf *nb, struct nlpcb *nlp)
 
 	if (!nl_writer_unicast(&nw, NLMSG_SMALL, nlp, false)) {
 		NL_LOG(LOG_DEBUG, "error allocating socket writer");
-		return (true);
+		return (EAGAIN);
 	}
 
-	nlmsg_ignore_limit(&nw);
+	if (!sync) {
+		nlmsg_ignore_limit(&nw);
+	}
 
 	struct nl_pstate npt = {
 		.nlp = nlp,
@@ -329,17 +329,21 @@ nl_process_nbuf(struct nl_buf *nb, struct nlpcb *nlp)
 		error = nl_receive_message(hdr, nb->datalen - nb->offset, nlp,
 		    &npt);
 		nb->offset += msglen;
-		if (__predict_false(error != 0 || nlp->nl_tx_blocked))
+		if (__predict_false(sync && error != 0)) {
+			nlmsg_flush(&nw);
+			return (error);
+		}
+		if (__predict_false(!sync && (error != 0 || nlp->nl_tx_blocked)))
 			break;
 	}
 	NL_LOG(LOG_DEBUG3, "packet parsing done");
 	nlmsg_flush(&nw);
 
-	if (nlp->nl_tx_blocked) {
+	if (!sync && nlp->nl_tx_blocked) {
 		NLP_LOCK(nlp);
 		nlp->nl_tx_blocked = false;
 		NLP_UNLOCK(nlp);
-		return (false);
+		return (EAGAIN);
 	} else
-		return (true);
+		return (0);
 }

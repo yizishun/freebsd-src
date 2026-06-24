@@ -254,6 +254,8 @@ Enables strict header checking.
 .Pq FreeBSD-specific
 Receives message originator data via socket control messages
 .Pq cmsg .
+.It Dv NETLINK_SND_SYNC
+(FreeBSD-specific) Processes send operations synchronously, bypassing the standard asynchronous queuing.
 .El
 .Pp
 Additionally, netlink overrides the following socket options from the
