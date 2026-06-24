@@ -357,12 +357,48 @@ ATF_TC_BODY(membership, tc)
 	    sizeof(struct in_addr)) == 0);
 }
 
+ATF_TC(sync);
+ATF_TC_HEAD(sync, tc)
+{
+	atf_tc_set_md_var(tc, "require.kmods", "netlink");
+}
+ATF_TC_BODY(sync, tc)
+{
+	char buf[BUFLEN];
+	int fd, sendsize;
+	int val = 1;
+	socklen_t optlen = sizeof(val);
+
+	/* Normal case */
+	ATF_REQUIRE((fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_GENERIC)) != -1);
+	ATF_REQUIRE(setsockopt(fd, SOL_NETLINK, NETLINK_SND_SYNC, &val, optlen) != -1);
+	ATF_REQUIRE(send(fd, &hdr, sizeof(hdr), 0) == sizeof(hdr));
+	ATF_REQUIRE(ioctl(fd, FIONWRITE, &sendsize) != -1);
+	ATF_REQUIRE_EQ(sendsize, 0);
+	ATF_REQUIRE(recv(fd, buf, sizeof(hdr), 0) == sizeof(hdr));
+
+	/* async to sync mid-session */
+	fd = fullsocket();
+	ATF_REQUIRE(setsockopt(fd, SOL_NETLINK, NETLINK_SND_SYNC, &val, optlen) == -1);
+	ATF_REQUIRE(errno == EBUSY);
+
+	/* sync to async */
+	ATF_REQUIRE((fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_GENERIC)) != -1);
+	ATF_REQUIRE(setsockopt(fd, SOL_NETLINK, NETLINK_SND_SYNC, &val, optlen) != -1);
+	ATF_REQUIRE(send(fd, &hdr, sizeof(hdr), 0) == sizeof(hdr));
+	val = 0;
+	ATF_REQUIRE(setsockopt(fd, SOL_NETLINK, NETLINK_SND_SYNC, &val, optlen) != -1);
+	ATF_REQUIRE(send(fd, &hdr, sizeof(hdr), 0) == sizeof(hdr));
+	ATF_REQUIRE(recv(fd, buf, BUFLEN, 0) > sizeof(hdr));
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, overflow);
 	ATF_TP_ADD_TC(tp, peek);
 	ATF_TP_ADD_TC(tp, sizes);
 	ATF_TP_ADD_TC(tp, membership);
+	ATF_TP_ADD_TC(tp, sync);
 
 	return (atf_no_error());
 }
