@@ -103,6 +103,15 @@ void	*vm_create_devmem(struct vmctx *ctx, int segid, const char *name,
 	    size_t len);
 
 /*
+ * Bind the shared memory object referenced by 'shmfd' to the device memory
+ * segment identified by 'segid'.
+ *
+ * Returns 0 on success and -1 otherwise.
+ */
+int	vm_bind_devmem(struct vmctx *ctx, int segid, int shmfd, const char *name,
+	    size_t len);
+
+/*
  * Map the memory segment identified by 'segid' into the guest address space
  * at [gpa,gpa+len) with protection 'prot'.
  */

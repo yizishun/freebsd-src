@@ -6,8 +6,10 @@
  */
 
 #include <sys/types.h>
+#include <sys/capsicum.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
+#include <sys/mman.h>
 #include <sys/sx.h>
 #include <sys/systm.h>
 
@@ -214,6 +216,75 @@ vm_alloc_memseg(struct vm *vm, int ident, size_t len, bool sysmem,
 	seg->sysmem = sysmem;
 
 	return (0);
+}
+
+int
+vm_bind_memseg(struct vm *vm, int ident, int shmfd, size_t len, bool sysmem)
+{
+	struct vm_mem_seg *seg;
+	struct vm_mem *mem;
+	struct file *shm_file;
+	struct shmfd *shm;
+	cap_rights_t rights;
+	void *rl_cookie;
+	int error;
+
+	mem = vm_mem(vm);
+	vm_assert_memseg_xlocked(vm);
+
+	if (ident < 0 || ident >= VM_MAX_MEMSEGS)
+		return (EINVAL);
+
+	if (len == 0 || (len & PAGE_MASK))
+		return (EINVAL);
+
+	seg = &mem->mem_segs[ident];
+	if (seg->object != NULL) {
+		if (seg->len == len && seg->sysmem == sysmem)
+			return (EEXIST);
+		else
+			return (EINVAL);
+	}
+	cap_rights_init(&rights, CAP_MMAP_RW);
+	error = fget(curthread, shmfd, &rights, &shm_file);
+	if (error != 0)
+		return (error);
+
+	if (shm_file->f_type != DTYPE_SHM) {
+		fdrop(shm_file, curthread);
+		return (EINVAL);
+	}
+	/* The guest requires read and write access to the memory segment. */
+	if ((shm_file->f_flag & (FREAD | FWRITE)) !=
+	    (FREAD | FWRITE)) {
+		fdrop(shm_file, curthread);
+		return (EACCES);
+	}
+
+	shm = shm_file->f_data;
+	if (shm_largepage(shm)) {
+		fdrop(shm_file, curthread);
+		return (EINVAL);
+	}
+	rl_cookie = rangelock_rlock(&shm->shm_rl, 0, OFF_MAX);
+	if (shm->shm_size < len ||
+	    (shm->shm_seals & F_SEAL_SHRINK) == 0 ||
+	    (shm->shm_seals & F_SEAL_SEAL) == 0 ||
+	    (shm->shm_seals & F_SEAL_WRITE) != 0) {
+		error = EINVAL;
+		goto out;
+	}
+
+	vm_object_reference(shm->shm_object);
+
+	seg->len = len;
+	seg->object = shm->shm_object;
+	seg->sysmem = sysmem;
+
+out:
+	rangelock_unlock(&shm->shm_rl, rl_cookie);
+	fdrop(shm_file, curthread);
+	return (error);
 }
 
 int

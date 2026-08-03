@@ -38,6 +38,7 @@ extern const char *vm_capstrmap[];
 	VM_SUSPEND,		\
 	VM_REINIT,		\
 	VM_ALLOC_MEMSEG,	\
+	VM_BIND_MEMSEG,		\
 	VM_GET_MEMSEG,		\
 	VM_MMAP_MEMSEG,		\
 	VM_MMAP_MEMSEG,		\

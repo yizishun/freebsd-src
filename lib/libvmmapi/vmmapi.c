@@ -386,6 +386,30 @@ cmpseg(size_t len, const char *str, size_t len2, const char *str2)
 }
 
 static int
+vm_bind_memseg(struct vmctx *ctx, int segid, int shmfd, const char *name,
+    size_t len)
+{
+	struct vm_shm_memseg shm_memseg;
+	size_t n;
+	int error;
+
+	bzero(&shm_memseg, sizeof(struct vm_shm_memseg));
+	shm_memseg.segid = segid;
+	shm_memseg.len = len;
+	shm_memseg.shmfd = shmfd;
+	if (name != NULL) {
+		n = strlcpy(shm_memseg.name, name, sizeof(shm_memseg.name));
+		if (n >= sizeof(shm_memseg.name)) {
+			errno = ENAMETOOLONG;
+			return (-1);
+		}
+	}
+
+	error = ioctl(ctx->fd, VM_BIND_MEMSEG, &shm_memseg);
+	return (error);
+}
+
+static int
 vm_alloc_memseg(struct vmctx *ctx, int segid, size_t len, const char *name,
     int ds_policy, domainset_t *ds_mask, size_t ds_size)
 {
@@ -684,6 +708,13 @@ size_t
 vm_get_highmem_size(struct vmctx *ctx)
 {
 	return (ctx->highmem_size);
+}
+
+int
+vm_bind_devmem(struct vmctx *ctx, int segid, int shmfd, const char *name,
+    size_t len)
+{
+	return (vm_bind_memseg(ctx, segid, shmfd, name, len));
 }
 
 void *

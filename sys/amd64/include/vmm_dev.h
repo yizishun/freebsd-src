@@ -62,6 +62,13 @@ struct vm_memseg {
 	int 		ds_policy;
 };
 
+struct vm_shm_memseg {
+	int		segid;
+	size_t		len;
+	char 		name[VM_MAX_SUFFIXLEN + 1];
+	int		shmfd;
+};
+
 struct vm_register {
 	int		cpuid;
 	int		regnum;		/* enum vm_reg_name */
@@ -341,7 +348,9 @@ enum {
 	/* checkpoint */
 	IOCNUM_SNAPSHOT_REQ = 113,
 
-	IOCNUM_RESTORE_TIME = 115
+	IOCNUM_RESTORE_TIME = 115,
+
+	IOCNUM_BIND_MEMSEG = 116,
 };
 
 #define	VM_RUN		\
@@ -360,6 +369,8 @@ enum {
 	_IOWR('v', IOCNUM_MMAP_GETNEXT, struct vm_memmap)
 #define	VM_MUNMAP_MEMSEG	\
 	_IOW('v', IOCNUM_MUNMAP_MEMSEG, struct vm_munmap)
+#define	VM_BIND_MEMSEG	\
+	_IOW('v', IOCNUM_BIND_MEMSEG, struct vm_shm_memseg)
 #define	VM_SET_REGISTER \
 	_IOW('v', IOCNUM_SET_REGISTER, struct vm_register)
 #define	VM_GET_REGISTER \

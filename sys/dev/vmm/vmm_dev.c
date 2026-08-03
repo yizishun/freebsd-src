@@ -318,6 +318,40 @@ done:
 	return (error);
 }
 
+static int
+bind_memseg(struct vmmdev_softc *sc, struct vm_shm_memseg *mseg)
+{
+	char *name;
+	bool sysmem;
+	int error;
+
+	name = NULL;
+	sysmem = VM_MEMSEG_NAME(mseg) == NULL;
+	if (!sysmem) {
+		name = malloc(sizeof(mseg->name), M_VMMDEV, M_WAITOK);
+		error = copystr(mseg->name, name, sizeof(mseg->name), NULL);
+		if (error != 0)
+			goto done;
+	}
+
+	error = vm_bind_memseg(sc->vm, mseg->segid, mseg->shmfd, mseg->len,
+	    sysmem);
+	if (error != 0)
+		goto done;
+
+	if (!sysmem) {
+		error = devmem_create_cdev(sc, mseg->segid, name);
+		if (error != 0)
+			vm_free_memseg(sc->vm, mseg->segid);
+		else
+			name = NULL;
+	}
+
+done:
+	free(name, M_VMMDEV);
+	return (error);
+}
+
 #if defined(__amd64__) && \
     (defined(COMPAT_FREEBSD14) || defined(COMPAT_FREEBSD12))
 /*
@@ -401,6 +435,8 @@ static const struct vmmdev_ioctl vmmdev_ioctls[] = {
 #endif
 #endif /* __amd64__ */
 	VMMDEV_IOCTL(VM_ALLOC_MEMSEG,
+	    VMMDEV_IOCTL_XLOCK_MEMSEGS | VMMDEV_IOCTL_LOCK_ALL_VCPUS),
+	VMMDEV_IOCTL(VM_BIND_MEMSEG,
 	    VMMDEV_IOCTL_XLOCK_MEMSEGS | VMMDEV_IOCTL_LOCK_ALL_VCPUS),
 	VMMDEV_IOCTL(VM_MMAP_MEMSEG,
 	    VMMDEV_IOCTL_XLOCK_MEMSEGS | VMMDEV_IOCTL_LOCK_ALL_VCPUS),
@@ -622,6 +658,13 @@ vmmdev_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 			}
 		}
 		error = alloc_memseg(sc, mseg, sizeof(mseg->name), domainset);
+		break;
+	}
+	case VM_BIND_MEMSEG: {
+		struct vm_shm_memseg *shm_memseg;
+
+		shm_memseg = (struct vm_shm_memseg *)data;
+		error = bind_memseg(sc, shm_memseg);
 		break;
 	}
 	case VM_GET_MEMSEG:
