@@ -66,6 +66,7 @@ SRCS=	\
 	tpm_ppi_qemu.c		\
 	uart_backend.c		\
 	uart_emul.c		\
+	udmabuf.c		\
 	usb_emul.c		\
 	usb_mouse.c		\
 	virtio.c		\
