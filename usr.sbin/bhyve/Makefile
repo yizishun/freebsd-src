@@ -26,6 +26,7 @@ SRCS=	\
 	bootrom.c		\
 	config.c		\
 	console.c		\
+	console_ipc.c		\
 	crc16.c			\
 	ctl_nvme_all.c		\
 	ctl_scsi_all.c		\

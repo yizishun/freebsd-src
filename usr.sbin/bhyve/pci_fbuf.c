@@ -52,6 +52,7 @@
 #include "pci_emul.h"
 #include "rfb.h"
 #include "udmabuf.h"
+#include "console_ipc.h"
 #ifdef __amd64__
 #include "amd64/vga.h"
 #endif
@@ -505,6 +506,8 @@ pci_fbuf_init(struct pci_devinst *pi, nvlist_t *nvl)
 
 	memset((void *)sc->fb_base, 0, FB_SIZE);
 
+	/* TODO: */
+	error = console_ipc_init(sc->rfb_wait);
 	error = rfb_init(sc->rfb_family, sc->rfb_host, sc->rfb_port,
 	sc->rfb_wait, sc->rfb_password);
 	if (error == 0)
