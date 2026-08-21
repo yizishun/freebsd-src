@@ -40,7 +40,7 @@ struct bhyvegc {
 };
 
 struct bhyvegc *
-bhyvegc_init(int width, int height, void *fbaddr)
+bhyvegc_init(int width, int height, void *fbaddr, int dmabuf)
 {
 	struct bhyvegc *gc;
 	struct bhyvegc_image *gc_image;
@@ -57,6 +57,8 @@ bhyvegc_init(int width, int height, void *fbaddr)
 		gc_image->data = calloc(width * height, sizeof (uint32_t));
 		gc->raw = 0;
 	}
+
+	gc_image->dmabuf = dmabuf;
 
 	gc->gc_image = gc_image;
 

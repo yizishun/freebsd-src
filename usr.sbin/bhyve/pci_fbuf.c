@@ -27,6 +27,7 @@
  */
 
 #include <sys/types.h>
+#include <sys/fcntl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -50,6 +51,7 @@
 #include "console.h"
 #include "pci_emul.h"
 #include "rfb.h"
+#include "udmabuf.h"
 #ifdef __amd64__
 #include "amd64/vga.h"
 #endif
@@ -384,8 +386,13 @@ pci_fbuf_render(struct bhyvegc *gc, void *arg)
 static int
 pci_fbuf_init(struct pci_devinst *pi, nvlist_t *nvl)
 {
-	int error;
 	struct pci_fbuf_softc *sc;
+	struct udmabuf_item item;
+	int dmabuf, error, memfd;
+
+	dmabuf = -1;
+	error = 0;
+	memfd = -1;
 
 	if (fbuf_sc != NULL) {
 		EPRINTLN("Only one frame buffer device is allowed.");
@@ -393,6 +400,9 @@ pci_fbuf_init(struct pci_devinst *pi, nvlist_t *nvl)
 	}
 
 	sc = calloc(1, sizeof(struct pci_fbuf_softc));
+	if (sc == NULL)
+		return (-1);
+	sc->fb_base = MAP_FAILED;
 
 	pi->pi_arg = sc;
 
@@ -402,11 +412,54 @@ pci_fbuf_init(struct pci_devinst *pi, nvlist_t *nvl)
 	pci_set_cfgdata8(pi, PCIR_CLASS, PCIC_DISPLAY);
 	pci_set_cfgdata8(pi, PCIR_SUBCLASS, PCIS_DISPLAY_VGA);
 
-	sc->fb_base = vm_create_devmem(pi->pi_vmctx, VM_FRAMEBUFFER,
-	    "framebuffer", FB_SIZE);
-	if (sc->fb_base == MAP_FAILED) {
-		error = -1;
-		goto done;
+	if (udmabuf_available()) {
+		memfd = memfd_create("framebuffer", MFD_ALLOW_SEALING);
+		if (memfd == -1) {
+			EPRINTLN("pci_fbuf: memfd_create failed with %d", errno);
+			error = -1;
+			goto done;
+		}
+
+		if (ftruncate(memfd, FB_SIZE) < 0) {
+			EPRINTLN("pci_fbuf: ftruncate failed with %d", errno);
+			error = -1;
+			goto done;
+		}
+		if (fcntl(memfd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_SEAL) < 0) {
+			EPRINTLN("pci_fbuf: fcntl failed with %d", errno);
+			error = -1;
+			goto done;
+		}
+		if (vm_bind_devmem(pi->pi_vmctx, VM_FRAMEBUFFER, memfd,
+		    "framebuffer", FB_SIZE) < 0) {
+			EPRINTLN("pci_fbuf: vm_bind_devmem failed with %d", errno);
+			error = -1;
+			goto done;
+		}
+		item.memfd = memfd;
+		item.offset = 0;
+		item.size = FB_SIZE;
+		dmabuf = udmabuf_do_create(&item, UDMABUF_FLAGS_CLOEXEC);
+		if (dmabuf < 0) {
+			EPRINTLN("pci_fbuf: udmabuf_do_create failed with %d",
+			    errno);
+			error = -1;
+			goto done;
+		}
+
+		sc->fb_base = mmap(NULL, FB_SIZE, PROT_READ | PROT_WRITE,
+		    MAP_SHARED, dmabuf, 0);
+		if (sc->fb_base == MAP_FAILED) {
+			error = -1;
+			goto done;
+		}
+	} else {
+		sc->fb_base = vm_create_devmem(pi->pi_vmctx, VM_FRAMEBUFFER,
+		    "framebuffer", FB_SIZE);
+		if (sc->fb_base == MAP_FAILED) {
+			error = -1;
+			goto done;
+		}
 	}
 
 	error = pci_emul_alloc_bar(pi, 0, PCIBAR_MEM32, DMEMSZ);
@@ -435,28 +488,40 @@ pci_fbuf_init(struct pci_devinst *pi, nvlist_t *nvl)
 	/* XXX until VGA rendering is enabled */
 	if (sc->vga_full != 0) {
 		EPRINTLN("pci_fbuf: VGA rendering not enabled");
+		error = -1;
 		goto done;
 	}
 
 	DPRINTF(DEBUG_INFO, ("fbuf frame buffer base: %p [sz %lu]",
 	        sc->fb_base, FB_SIZE));
 
-	console_init(sc->memregs.width, sc->memregs.height, sc->fb_base);
+	console_init(sc->memregs.width, sc->memregs.height, sc->fb_base,
+	    dmabuf);
 	console_fb_register(pci_fbuf_render, sc);
 
 	if (sc->vga_enabled)
 		sc->vgasc = vga_init(!sc->vga_full);
 	sc->gc_image = console_get_image();
 
-	fbuf_sc = sc;
-
 	memset((void *)sc->fb_base, 0, FB_SIZE);
 
 	error = rfb_init(sc->rfb_family, sc->rfb_host, sc->rfb_port,
-	    sc->rfb_wait, sc->rfb_password);
+	sc->rfb_wait, sc->rfb_password);
+	if (error == 0)
+		fbuf_sc = sc;
+
 done:
-	if (error)
+	/* The VMM and dma-buf hold their own references to the memfd object. */
+	if (memfd >= 0)
+		close(memfd);
+	if (error != 0) {
+		if (sc->fb_base != MAP_FAILED)
+			munmap(sc->fb_base, FB_SIZE);
+		if (dmabuf >= 0)
+			close(dmabuf);
+		pi->pi_arg = NULL;
 		free(sc);
+	}
 
 	return (error);
 }

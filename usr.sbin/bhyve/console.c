@@ -47,9 +47,9 @@ static struct {
 } console;
 
 void
-console_init(int w, int h, void *fbaddr)
+console_init(int w, int h, void *fbaddr, int dmabuf)
 {
-	console.gc = bhyvegc_init(w, h, fbaddr);
+	console.gc = bhyvegc_init(w, h, fbaddr, dmabuf);
 }
 
 void
